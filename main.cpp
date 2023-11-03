@@ -9,7 +9,6 @@
 #include <iomanip>
 #include <queue>
 
-
 void printVector(const std::vector<int> &vector, const std::string &title) {
     std::cout << title << '\n';
     for (auto t: vector) {
@@ -54,7 +53,7 @@ std::vector<double> even(const std::vector<double> &vector, int max_index) {
 
 //Code parameters
 int m = 6;
-int k = 34;
+int k = 28;
 
 //AWGN parameters
 
@@ -64,6 +63,8 @@ double p = 0.5;
 //Freezed subchannels
 std::set<int> F;
 std::vector<std::pair<double, int>> error_probability;
+
+
 
 //AWGN channel
 double theta(double x) {
@@ -151,103 +152,177 @@ std::vector<int> code(std::vector<int> &information_word) {
     return result;
 }
 
+constexpr int NOT_EVALUATED = -239239;
 
-double S(int lambda, int j, std::vector<int> &u, std::vector<double> &y) {
-    if (j == 0 && lambda == 0) {
-        return -y[0];
+void update_u_memory(int lambda, int j, std::vector<std::vector<int>> &u_memory) {
+    if (lambda == 0) {
+        return;
+    }
+    int i = j >> 1;
+    int left = (2 * i) - (i % (1 << (lambda - 1)));
+    int right = (1 << (lambda - 1)) + (2 * i) - (i % (1 << (lambda - 1)));
+    if (j % 2 == 1) {
+        u_memory[lambda - 1][left] = u_memory[lambda][2 * i] ^ u_memory[lambda][2 * i + 1];
+        u_memory[lambda - 1][right] = u_memory[lambda][2 * i + 1];
+        update_u_memory(lambda - 1, left, u_memory);
+        update_u_memory(lambda - 1, right, u_memory);
+    }
+
+}
+
+std::vector<int> reversed_permutation(1 << m);
+
+
+void S(int lambda, int j, std::vector<std::vector<int>> &u_memory, std::vector<std::vector<double>> &L_memory) {
+
+    if (lambda == 0) {
+        return;
     }
 
     int i = j >> 1;
 
-    auto v_e = even(u, 2 * i);
-    auto v_o = odd(u, 2 * i);
-    auto y_e = even(y, y.size());
-    auto y_o = odd(y, y.size());
+    int left = (2 * i) - (i % (1 << (lambda - 1)));
+    int right = (1 << (lambda - 1)) + (2 * i) - (i % (1 << (lambda - 1)));
 
-    std::vector<int> xorr(v_e);
-    for (int l = 0; l < xorr.size(); ++l) {
-        xorr[l] ^= v_o[l];
+    double a;
+
+    if (L_memory[lambda - 1][left] == NOT_EVALUATED) {
+        S(lambda - 1, left,  u_memory, L_memory);
     }
+    a = L_memory[lambda - 1][left];
+    double b;
+    if (L_memory[lambda - 1][right] == NOT_EVALUATED) {
+        S(lambda - 1, right, u_memory, L_memory);
+    }
+    b = L_memory[lambda - 1][right];
 
-    double a = S(lambda - 1, i, xorr, y_e);
-    double b = S(lambda - 1, i, v_o, y_o);
+    double res;
     if (j % 2 == 0) {
-        return std::min(std::abs(a), std::abs(b)) * (a > 0 ? 1.0 : -1.0) * (b > 0 ? 1.0 : -1.0);
+        res = std::min(std::abs(a), std::abs(b)) * (a > 0 ? 1.0 : -1.0) * (b > 0 ? 1.0 : -1.0);
     } else {
-        return b + (((u[2 * i] % 2 == 0) ? 1.0 : -1.0) * a);
+        res = b + (((u_memory[lambda][2 * i] % 2 == 0) ? 1.0 : -1.0) * a);
     }
+    L_memory[lambda][j] = res;
 }
 
 
 std::vector<int> decode(std::vector<double> &corrupted_word) {
     std::vector<int> result;
-
+    std::vector<std::vector<int>> u_memory(m + 1, std::vector<int>((1 << m), NOT_EVALUATED));
+    std::vector<std::vector<double>> L_memory(m + 1, std::vector<double>(1 << m, NOT_EVALUATED));
+    for (int i = 0; i < (1 << m); ++i) {
+        L_memory[0][i] = -corrupted_word[reversed_permutation[i]];
+    }
     for (int i = 0; i < (1 << m); i++) {
         if (F.count(i) == 0) {
-            double res = S(m, i, result, corrupted_word);
-            result.push_back((res > 0) ? 0 : 1);
+            S(m, i, u_memory, L_memory);
+            int res = (L_memory[m][i] > 0) ? 0 : 1;
+            result.push_back(res);
+            u_memory[m][i] = res;
         } else {
             result.push_back(0);
+            u_memory[m][i] = 0;
         }
+        update_u_memory(m, i, u_memory);
     }
     return result;
 }
 
+int inline sign(double a) {
+    if (a > 0) {
+        return 1;
+    } else if (a == 0) {
+      return 0;
+    } else {
+        return -1;
+    }
+}
+
+double phi(double mu, double lambda, int u) {
+    if (2 * u == (1 - sign(lambda))) {
+        return mu;
+    } else {
+        return mu + std::abs(lambda);
+    }
+}
+
+struct path {
+    double LLR = 0;
+    std::vector<int> word{};
+    int memory_link = 0;
+};
 
 std::vector<int> list_decoder(std::vector<double> &corrupted_word, int L) {
-    std::priority_queue<std::pair<double, std::vector<int>>> list;
-    list.push({0, {}});
-//    list.push_back(std::make_pair(0, std::vector<int>(0)))
+    std::vector<std::vector<std::vector<double>>> path_L_memory(L, std::vector<std::vector<double>>(m + 1, std::vector<double>(1 << m, NOT_EVALUATED)));
+    std::vector<std::vector<std::vector<int>>> path_u_memory(L, std::vector<std::vector<int>>(m + 1, std::vector<int>((1 << m), NOT_EVALUATED)));
+    for (int j = 0; j < L; ++j) {
+        for (int i = 0; i < (1 << m); ++i) {
+            path_L_memory[j][0][i] = -corrupted_word[reversed_permutation[i]];
+        }
+    }
+    auto cmp = [](path &left, path &right){
+        if (left.word.size() < right.word.size()) {
+            return false;
+        } else if (left.word.size() > right.word.size()) {
+            return true;
+        }
+        return left.LLR > right.LLR;
+    };
+
+    std::priority_queue<path, std::vector<path>, decltype(cmp)> list(cmp);
+    list.emplace();
     for (int i = 0; i < (1 << m); ++i) {
-        std::priority_queue<std::pair<double, std::vector<int>>> new_list;
-        std::vector<std::vector<int>> new_layer;
         if (F.count(i) != 0) {
             auto size = list.size();
             for (int j = 0; j < size; ++j) {
-                auto top_element = list.top().second;
+                auto top_element = list.top();
                 list.pop();
-                top_element.push_back(0);
-                new_layer.push_back(top_element);
+                top_element.word.push_back(0);
+                S(m, i, path_u_memory[top_element.memory_link], path_L_memory[top_element.memory_link]);
+                top_element.LLR = phi(top_element.LLR, path_L_memory[top_element.memory_link][m][i], 0);
+                path_u_memory[top_element.memory_link][m][i] = 0;
+                update_u_memory(m, i, path_u_memory[top_element.memory_link]);
+                list.push(top_element);
+
             }
         } else {
+            std::priority_queue<path, std::vector<path>, decltype(cmp)> new_list(cmp);
             auto size = list.size();
             for (int j = 0; j < size; ++j) {
-                auto top_element = list.top().second;
+                auto zero_next = list.top();
                 list.pop();
-//                double res = S(m, i, top_element, corrupted_word);
-//                top_element.push_back((res > 0) ? 0 : 1);
-//                top_element.push_back(0);
-                auto copy_top_element = top_element;
-                copy_top_element.push_back(1);
-                top_element.push_back(0);
-                new_layer.push_back(top_element);
-                new_layer.push_back(copy_top_element);
+                auto one_next = zero_next;
+                zero_next.word.push_back(0);
+                one_next.word.push_back(1);
+                S(m, i, path_u_memory[zero_next.memory_link], path_L_memory[zero_next.memory_link]);
+
+                zero_next.LLR = phi(zero_next.LLR, path_L_memory[zero_next.memory_link][m][i], 0);
+                one_next.LLR = phi(one_next.LLR, path_L_memory[one_next.memory_link][m][i], 1);
+
+                new_list.push(zero_next);
+                new_list.push(one_next);
+
             }
+
+            std::vector<std::vector<std::vector<double>>> new_path_L_memory(L, std::vector<std::vector<double>>(m + 1));
+            std::vector<std::vector<std::vector<int>>> new_path_u_memory(L, std::vector<std::vector<int>>(m + 1));
+            for (int j = 0; j < L && !new_list.empty(); ++j) {
+                auto top = new_list.top();
+                new_path_L_memory[j] = (path_L_memory[top.memory_link]);
+                new_path_u_memory[j] = (path_u_memory[top.memory_link]);
+                new_path_u_memory[j][m][i] = top.word[top.word.size() - 1];
+                update_u_memory(m, i, new_path_u_memory[j]);
+                top.memory_link = j;
+                list.push(top);
+                new_list.pop();
+            }
+            path_L_memory = new_path_L_memory;
+            path_u_memory = new_path_u_memory;
         }
-        for (int j = 0; j < new_layer.size(); ++j) {
-            double lop = S(m, i, new_layer[j], corrupted_word);
-            new_list.emplace(lop * (-2 * new_layer[j][new_layer[j].size() - 1] + 1), new_layer[j]);
-        }
-        while(!list.empty()) {
-            list.pop();
-        }
-        for (int j = 0; j < L; ++j) {
-            auto top_elelment = new_list.top();
-            list.push(top_elelment);
-        }
-        
     }
 
-    auto result = list.top().second;
-//    for (int i = 0; i < (1 << m); i++) {
-//        if (F.count((1 << m) - 1) == 0) {
-//            double res = S(m, (1 << m) - 1, result, corrupted_word);
-//            result.push_back((res > 0) ? 0 : 1);
-//        } else {
-//            result.push_back(0);
-//        }
-//    }
-return result;
+    auto result = list.top().word;
+    return result;
 }
 
 
@@ -303,20 +378,21 @@ bool words_equals(std::vector<int> const &a, std::vector<int> const &b) {
     return true;
 }
 
+constexpr int ITERATION = 100000;
+
 void collect_data(int precision) {
-    for (double Eb = 3.0; Eb < 5.5; Eb += 0.5) {
+    for (double Eb = 0; Eb < 5.5; Eb += 0.5) {
         double variability = static_cast<double>((1 << m)) / (2 * pow(10.0, (Eb / 10)) * ((1 << m) - k));
         find_freezed_channels(variability);
 
-        double correct = 0;
+        volatile double correct = 0;
         double all = precision;
-        for (int tries = 0; tries < all; tries++) {
+        #pragma omp parallel for reduction(+:correct, all)
+        for (int tries = 0; tries < ITERATION; tries++) {
             auto information_word = get_random_word((1 << m) - k);
             auto coded_word = code(information_word);
             std::vector<double> corrupt = get_corrupt(coded_word, pow(10.0, (Eb / 10)));
-//            auto result = list_decoder(corrupt, 256);
             auto result = decode(corrupt);
-//            auto list_result = list_decoder(corrupt, 1);
             std::vector<int> result_without_freezing;
             for (int i = 0; i < result.size(); ++i) {
                 if (F.count(i) == 0) {
@@ -326,46 +402,24 @@ void collect_data(int precision) {
 
             if (words_equals(result_without_freezing, information_word)) {
                 correct++;
-//                std::vector<int> result_list_without_freezing;
-//                for (int i = 0; i < list_result.size(); ++i) {
-//                    if (F.count(i) == 0) {
-//                        result_list_without_freezing.push_back(list_result[i]);
-//                    }
-//                }
-//                if (!words_equals(result_list_without_freezing, information_word)) {
-//                    int x = 1;
-//                    x += 1;
-//                }
             }
         }
+
         std::cout << std::fixed << std::setprecision(6) << Eb << ";" << (all - correct) / all << '\n';
     }
 }
 
-int main() {
-    collect_data(1000);
-//    std::priority_queue<std::pair<double, std::vector<int>>> priorityQueue;
-//    priorityQueue.push({1.1, {1, 0}});
-//    priorityQueue.push({1.2, {1, 0, 1}});
-//    priorityQueue.push({1.3, {1, 1}});
-//    priorityQueue.push({1.0, {0}});
-//    priorityQueue.push({1.0, {0, 1}});
-//    std::cout << priorityQueue.size() << '\n';
-//    int size = priorityQueue.size();
-//    for (int i = 0; i < size; ++i) {
-//        std::cout << priorityQueue.top().first << ' ' << priorityQueue.top().second.size() << '\n';
-//        priorityQueue.pop();
-//    }
-//    find_freezed_channels(5.0);
-////    std::vector<int> info_word{1, 1, 1, 1, 1};
-////    auto coded = code(info_word);
-//    std::vector<double> corrupted_word{-0.10039712500291453, 0.12456834960559582, 0.031906924486806432, -1.7838410749533051, -1.4241922215541076, -1.5579572196246154, 1.7401530350590679, -0.45626271517822514};
-//
-////    auto
-//    auto res = list_decoder(corrupted_word, 1);
-//    printVector(res, "List decoded: ");
-    return 0;
-
+void init_reversed_permutation() {
+    for (int i = 0; i < (1 << m); ++i) {
+        int res = 0;
+        for (int j = 0; j < m; ++j) {
+            res |= (((i & (1 << j)) == 0) ? 0 : 1) << (m - 1 - j);
+        }
+        reversed_permutation[i] = res;
+    }
 }
 
-// (,) (f a) (f b) -> f ((,) a b)
+int main() {
+    init_reversed_permutation();
+    collect_data(ITERATION);
+}
