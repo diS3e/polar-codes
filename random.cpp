@@ -16,6 +16,11 @@ int random::rnd(int l, int r) {
 
 std::vector<int> random::get_random_word(int length) {
     std::vector<int> result(length);
-    for (auto &t: result) t = rnd(0, 1);
+    get_random_word_inplace(length, result);
     return result;
+}
+
+
+void random::get_random_word_inplace(int length, std::vector<int>& a) {
+    for (auto &t: a) t = rnd(0, 1);
 }
