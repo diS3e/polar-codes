@@ -49,6 +49,7 @@ float finding_error_probability_awgn(int _m, int i, float variability) {
 
 void find_freezed_channels(int m, int k, float variability) {
     F.clear();
+    error_probability.clear();
     for (int i = 0; i < (1 << m); ++i) {
         error_probability.emplace_back(finding_error_probability_awgn(m, i, variability), i);
     }
@@ -74,7 +75,7 @@ struct SCL {
     std::vector<std::vector<int>> pathIndexToArrayIndex;
     std::vector<std::vector<int>> arrayReferenceCount;
     bool *contForks;
-    std::pair<float, int>* find_max_array;
+    std::pair<float, int> *find_max_array;
 
 
     SCL(int m, int k, int list_size) :
@@ -89,8 +90,8 @@ struct SCL {
             arrayPointer_C(m + 1, std::vector<int *>(L)),
             pathIndexToArrayIndex(m + 1, std::vector<int>(L)),
             arrayReferenceCount(m + 1, std::vector<int>(L)) {
-        find_max_array = (std::pair<float, int>*) malloc(sizeof(std::pair<float, int>) * L * 2);
-        contForks = (bool*) malloc(sizeof(bool) * L * 2);
+        find_max_array = (std::pair<float, int> *) malloc(sizeof(std::pair<float, int>) * L * 2);
+        contForks = (bool *) malloc(sizeof(bool) * L * 2);
         for (int lambda = 0; lambda < m + 1; ++lambda) {
             for (int s = 0; s < L; ++s) {
                 arrayPointer_P[lambda][s] = new float[1 << (m - lambda)]();
@@ -114,7 +115,7 @@ struct SCL {
                     arrayPointer_C[lambda][s][i] = 239;
                 }
 #endif
-                inactiveArrayIndices[lambda].push( L - 1 - s);
+                inactiveArrayIndices[lambda].push(L - 1 - s);
                 pathIndexToArrayIndex[lambda][s] = -1;
             }
         }
@@ -145,7 +146,7 @@ struct SCL {
         _encode(result, l + ((r - l) >> 1), r);
     }
 
-    void encode_inplace(const std::vector<int>& information_word, std::vector<int> &result) {
+    void encode_inplace(const std::vector<int> &information_word, std::vector<int> &result) {
         for (int i = 0, j = 0; i < (1 << m); i++) {
             if (F.count(i) == 0) {
                 result[i] = information_word[j];
@@ -206,14 +207,9 @@ struct SCL {
             s1 = s;
         } else {
             s1 = inactiveArrayIndices[lambda].pop();
-            std::copy(arrayPointer_C[lambda][s], arrayPointer_C[lambda][s] + (1 << (m - lambda + 1)),
-                      arrayPointer_C[lambda][s1]);
-            std::copy(arrayPointer_P[lambda][s], arrayPointer_P[lambda][s] + (1 << (m - lambda)),
-                      arrayPointer_P[lambda][s1]);
             arrayReferenceCount[lambda][s]--;
             arrayReferenceCount[lambda][s1] = 1;
             pathIndexToArrayIndex[lambda][l] = s1;
-
         }
         return arrayPointer_P[lambda][s1];
     }
@@ -287,7 +283,7 @@ struct SCL {
                 continue;
             }
             auto P_lambda = getArrayPointer_P(lambda, l);
-            auto P_lambda1 = getArrayPointer_P(lambda - 1, l);
+            auto P_lambda1 = arrayPointer_P[lambda - 1][pathIndexToArrayIndex[lambda - 1][l]];
             auto C_lambda = getArrayPointer_C(lambda, l);
             int layer_size = 1 << (m - lambda);
             for (int beta = 0; beta < (1 << (m - lambda)); beta += 8) {
@@ -352,10 +348,10 @@ struct SCL {
                 if (arrayReferenceCount[m - index][s_index] == 0) {
                     std::cout << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!";
                 }
-                    int new_inactive_array = inactiveArrayIndices[m - index].pop();
-                    pathIndexToArrayIndex[m - index][l] = new_inactive_array;
-                    arrayReferenceCount[m - index][s_index]--;
-                    arrayReferenceCount[m - index][new_inactive_array] = 1;
+                int new_inactive_array = inactiveArrayIndices[m - index].pop();
+                pathIndexToArrayIndex[m - index][l] = new_inactive_array;
+                arrayReferenceCount[m - index][s_index]--;
+                arrayReferenceCount[m - index][new_inactive_array] = 1;
                 s_index = new_inactive_array;
             }
 
@@ -370,7 +366,9 @@ struct SCL {
             arrayPointer_C[m - index][s_index][put_pointer] = arrayPointer_C[m - 0][pathIndexToArrayIndex[m - 0][l]][1];
             for (int i = 0; i < index; ++i) {
                 for (int j = 0; j < (1 << i); ++j) {
-                    arrayPointer_C[m - index][s_index][(1 << index) - (1 << (i + 1)) + j] *= -arrayPointer_C[m - index][s_index][(1 << index) - (1 << i) + j];
+                    arrayPointer_C[m - index][s_index][(1 << index) - (1 << (i + 1)) + j] *= -arrayPointer_C[m -
+                                                                                                             index][s_index][
+                            (1 << index) - (1 << i) + j];
                 }
             }
         }
@@ -398,13 +396,13 @@ struct SCL {
         for (int l = 0; l < L; ++l) {
             if (activePath[l]) {
                 auto P_m = getArrayPointer_P(m, l);
-                find_max_array[2 * l] = { Phi(LLRs[l], P_m[0], 0), 2 * l};
-                find_max_array[2 * l + 1] = { Phi(LLRs[l], P_m[0], 1), 2 * l + 1};
+                find_max_array[2 * l] = {Phi(LLRs[l], P_m[0], 0), 2 * l};
+                find_max_array[2 * l + 1] = {Phi(LLRs[l], P_m[0], 1), 2 * l + 1};
 
                 i++;
             } else {
-                find_max_array[2 * l] = { std::numeric_limits<float>::max(), 2 * l};
-                find_max_array[2 * l + 1] = { std::numeric_limits<float>::max(), 2 * l + 1};
+                find_max_array[2 * l] = {std::numeric_limits<float>::max(), 2 * l};
+                find_max_array[2 * l + 1] = {std::numeric_limits<float>::max(), 2 * l + 1};
             }
         }
         int rho = std::min(2 * i, L);
@@ -435,7 +433,15 @@ struct SCL {
                 C_m[(phi % 2)] = -1;
 
                 int l1 = clonePath(l);
-                getArrayPointer_P(m, l1);
+                int s = pathIndexToArrayIndex[m][l1];
+                int s1 = inactiveArrayIndices[m].pop();
+                // copy trees root
+                arrayPointer_C[m][s1][0] = arrayPointer_C[m][s][0];
+                arrayPointer_C[m][s1][1] = arrayPointer_C[m][s][1];
+                arrayPointer_P[m][s1][0] = arrayPointer_P[m][s][0];
+                arrayReferenceCount[m][s]--;
+                arrayReferenceCount[m][s1] = 1;
+                pathIndexToArrayIndex[m][l] = s1;
                 C_m = getArrayPointer_C(m, l1);
                 C_m[phi % 2] = 1;
                 auto P_m = getArrayPointer_P(m, l);
@@ -542,11 +548,12 @@ struct SCL {
         get_corrupted_inplace(random_codeword, arg, ans);
         return ans;
     }
+
     void get_corrupted_inplace(const std::vector<int> &random_codeword, float arg, std::vector<float> &result) const {
         int n = 1 << m;
         for (int i = 0; i < n; ++i) {
             result[i] = ((random_codeword[i] * 2) - 1) +
-                     sqrt(static_cast<float>(n) / (2 * arg * (n - k))) * rnd.normal(rnd.rng);
+                        sqrt(static_cast<float>(n) / (2 * arg * (n - k))) * rnd.normal(rnd.rng);
         }
     }
 };
@@ -567,7 +574,7 @@ void collect_data_scl(int m, int k, int L, int precision) {
     std::vector<float> corrupted_word(1 << m);
     std::vector<int> result_without_freezing;
 
-    for (float Eb = 5.5; Eb < 6.0; Eb += 0.5) {
+    for (float Eb = 4.5; Eb < 6.0; Eb += 0.5) {
 
         float variability = static_cast<float>((1 << m)) / (2 * pow(10.0, (Eb / 10)) * ((1 << m) - k));
         find_freezed_channels(m, k, variability);
