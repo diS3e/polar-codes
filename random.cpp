@@ -1,6 +1,3 @@
-//
-// Created by dis3e on 03.11.23.
-//
 #include "random.h"
 
 random::random() : rng((std::chrono::steady_clock::now().time_since_epoch().count())),

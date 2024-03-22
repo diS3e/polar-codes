@@ -1,7 +1,3 @@
-//
-// Created by dis3e on 03.11.23.
-//
-
 #ifndef POLAR_CODES_RANDOM_H
 #define POLAR_CODES_RANDOM_H
 
